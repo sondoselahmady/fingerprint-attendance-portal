@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title>Fingerprint Attendance & Analytics</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { background-color: #f4f6f9; padding: 25px; font-family: system-ui, -apple-system, sans-serif; }
+    .card { border-radius: 10px; border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 20px; }
+    .nav-tabs .nav-link { font-weight: 500; color: #495057; }
+    .nav-tabs .nav-link.active { font-weight: 600; color: #0d6efd; }
+    .badge-late { background-color: #dc3545; color: white; }
+    .badge-ontime { background-color: #198754; color: white; }
+    .badge-early { background-color: #fd7e14; color: white; }
+    .badge-missing { background-color: #6c757d; color: white; }
+    .stat-card { border-left: 4px solid #0d6efd; }
+    .chart-container { position: relative; height: 280px; }
+    .upload-box { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; }
+  </style>
+</head>
+<body>
+  <div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div>
+        <h3 class="fw-bold mb-0">Fingerprint Attendance Portal</h3>
+        <small class="text-muted">Target Shift: 08:30:00 (Grace until 08:35:00) &bull; Dismissal: 16:30:00</small>
+      </div>
+      <div class="dropdown">
+        <button class="btn btn-outline-danger btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+          Reset Tools
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end">
+          <li><a class="dropdown-item text-danger" href="javascript:void(0)" onclick="confirmResetPunches()">Clear Punch Logs</a></li>
+          <li><a class="dropdown-item text-danger" href="javascript:void(0)" onclick="confirmResetDirectory()">Clear Name Mappings</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Unnumbered Navigation Tabs -->
+    <ul class="nav nav-tabs" id="mainTabs">
+      <li class="nav-item">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#uploadTab">Upload Logs</button>
+      </li>
+      <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#analyticsTab" onclick="loadData('analytics')">Daily Reports & Analytics</button>
+      </li>
+      <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#databaseTab" onclick="loadData('database')">Database View & Exceptions</button>
+      </li>
+    </ul>
+
+    <div class="tab-content mt-4">
+      <!-- UPLOAD TAB -->
+      <div class="tab-pane fade show active" id="uploadTab">
+        <div class="row g-4 mx-auto" style="max-width: 900px;">
+          <!-- Card 1: Upload Punches -->
+          <div class="col-12">
+            <div class="upload-box shadow-sm">
+              <h5 class="fw-bold mb-2">Upload Punch Logs</h5>
+              <p class="text-muted small mb-3">Upload raw device logs (.txt, .dat, or .csv). Timestamps and employee IDs are detected automatically.</p>
+              
+              <div class="input-group mb-3">
+                <input type="file" id="fileInput" class="form-control" accept=".txt,.csv,.dat">
+                <button id="uploadBtn" class="btn btn-primary px-4 fw-semibold" onclick="handleFileUpload()">
+                  Import Logs
+                </button>
+              </div>
+              <div id="uploadFeedback" class="small"></div>
+            </div>
+          </div>
+
+          <!-- Card 2: Upload Name-to-ID Sheet -->
+          <div class="col-12">
+            <div class="upload-box shadow-sm border-start border-primary border-3">
+              <h5 class="fw-bold mb-2">Upload Name-ID Mapping Sheet</h5>
+              <p class="text-muted small mb-3">Attach employee names to their IDs. Accepts text or CSV files formatted as: <code>ID, Full Name</code>.</p>
+              
+              <div class="input-group mb-3">
+                <input type="file" id="mappingInput" class="form-control" accept=".txt,.csv,.tsv">
+                <button id="mappingBtn" class="btn btn-outline-primary px-4 fw-semibold" onclick="handleMappingUpload()">
+                  Link Names
+                </button>
+              </div>
+              <div id="mappingFeedback" class="small"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ANALYTICS TAB WITH CHARTS -->
+      <div class="tab-pane fade" id="analyticsTab">
+        <div class="card p-4">
+          <div class="row align-items-center mb-3">
+            <div class="col-md-5">
+              <label class="form-label fw-bold mb-1">Select Employee for Individual Analytics:</label>
+              <select id="userChartSelect" class="form-select" onchange="updateEmployeeCharts()">
+                <option value="">-- Choose Employee --</option>
+              </select>
+            </div>
+            <div class="col-md-7 text-md-end mt-2 mt-md-0">
+              <span id="employeeQuickStats" class="text-muted small"></span>
+            </div>
+          </div>
+
+          <div id="chartRow" class="row g-3" style="display: none;">
+            <div class="col-lg-8">
+              <div class="p-3 bg-light rounded border">
+                <h6 class="fw-bold text-secondary mb-2">Daily Worked Hours Trend</h6>
+                <div class="chart-container">
+                  <canvas id="hoursBarChart"></canvas>
+                </div>
+              </div>
+            </div>
+            <div class="col-lg-4">
+              <div class="p-3 bg-light rounded border">
+                <h6 class="fw-bold text-secondary mb-2">Punctuality Breakdown</h6>
+                <div class="chart-container">
+                  <canvas id="punctualityDonutChart"></canvas>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card p-3">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <div class="d-flex align-items-center gap-2">
+              <span class="fw-semibold">Aggregate Summary By:</span>
+              <div class="btn-group" role="group">
+                <input type="radio" class="btn-check" name="reportMode" id="modeDate" checked onchange="renderAnalyticsTable()">
+                <label class="btn btn-outline-primary btn-sm" for="modeDate">Date</label>
+                <input type="radio" class="btn-check" name="reportMode" id="modeUser" onchange="renderAnalyticsTable()">
+                <label class="btn btn-outline-primary btn-sm" for="modeUser">Employee</label>
+              </div>
+            </div>
+            <button class="btn btn-sm btn-outline-primary" onclick="loadData('analytics')">Refresh</button>
+          </div>
+
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead class="table-light" id="analyticsThead"></thead>
+              <tbody id="analyticsBody">
+                <tr><td colspan="6" class="text-center py-4 text-muted">Load data to view analytics.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- DATABASE VIEW & EXCEPTIONS TAB -->
+      <div class="tab-pane fade" id="databaseTab">
+        <div class="row g-3 mb-4">
+          <div class="col-md-3">
+            <div class="card stat-card p-3">
+              <span class="text-muted small">Total Records</span>
+              <h4 class="fw-bold mb-0" id="statTotal">-</h4>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card stat-card p-3" style="border-left-color: #dc3545;">
+              <span class="text-muted small">Late Arrivals (&gt; 08:35)</span>
+              <h4 class="fw-bold text-danger mb-0" id="statLate">-</h4>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card stat-card p-3" style="border-left-color: #fd7e14;">
+              <span class="text-muted small">Early Departures (&lt; 16:30)</span>
+              <h4 class="fw-bold text-warning mb-0" id="statEarly">-</h4>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="card stat-card p-3" style="border-left-color: #6c757d;">
+              <span class="text-muted small">Missing Checkouts</span>
+              <h4 class="fw-bold text-secondary mb-0" id="statMissing">-</h4>
+            </div>
+          </div>
+        </div>
+
+        <div class="card p-3">
+          <div class="d-flex flex-wrap gap-4 align-items-center mb-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="filterLate" onchange="renderFilteredData()">
+              <label class="form-check-label" for="filterLate">Late Only</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="filterEarly" onchange="renderFilteredData()">
+              <label class="form-check-label" for="filterEarly">Early Only</label>
+            </div>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="filterMissing" onchange="renderFilteredData()">
+              <label class="form-check-label" for="filterMissing">Missing Checkout Only</label>
+            </div>
+            <div class="ms-auto d-flex gap-2">
+              <button class="btn btn-sm btn-outline-primary" onclick="loadData('database')">Reload</button>
+              <button class="btn btn-sm btn-success" onclick="downloadCSV()">Export CSV</button>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>Employee ID</th>
+                  <th>Name</th>
+                  <th>Date</th>
+                  <th>Arrival</th>
+                  <th>Arrival Status</th>
+                  <th>Dismissal</th>
+                  <th>Dismissal Status</th>
+                  <th>Worked Hours</th>
+                </tr>
+              </thead>
+              <tbody id="recordsBody">
+                <tr><td colspan="8" class="text-center py-4 text-muted">Click tab or reload to display records.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    let rawDataset = [];
+    let barChartInstance = null;
+    let donutChartInstance = null;
+
+    // Upload Punch Logs
+    function handleFileUpload() {
+      const fileInput = document.getElementById("fileInput");
+      const feedback = document.getElementById("uploadFeedback");
+      const uploadBtn = document.getElementById("uploadBtn");
+
+      if (!fileInput.files.length) {
+        feedback.innerHTML = '<span class="text-danger">Please choose a file first.</span>';
+        return;
+      }
+
+      uploadBtn.disabled = true;
+      feedback.innerHTML = '<span class="text-secondary">Importing...</span>';
+
+      const file = fileInput.files[0];
+      const reader = new FileReader();
+
+      reader.onload = function(e) {
+        google.script.run
+          .withSuccessHandler(res => {
+            uploadBtn.disabled = false;
+            if (res.success) {
+              feedback.innerHTML = `<span class="text-success fw-bold">${res.message}</span>`;
+            } else {
+              feedback.innerHTML = `<span class="text-danger">${res.message}</span>`;
+            }
+          })
+          .withFailureHandler(err => {
+            uploadBtn.disabled = false;
+            feedback.innerHTML = `<span class="text-danger">Error: ${err.message}</span>`;
+          })
+          .uploadLogsDirectly(e.target.result);
+      };
+      reader.readAsText(file);
+    }
+
+    // Upload Name-ID Mapping
+    function handleMappingUpload() {
+      const fileInput = document.getElementById("mappingInput");
+      const feedback = document.getElementById("mappingFeedback");
+      const mappingBtn = document.getElementById("mappingBtn");
+
+      if (!fileInput.files.length) {
+        feedback.innerHTML = '<span class="text-danger">Please choose a mapping file first.</span>';
+        return;
+      }
+
+      mappingBtn.disabled = true;
+      feedback.innerHTML = '<span class="text-secondary">Processing mapping...</span>';
+
+      const file = fileInput.files[0];
+      const reader = new FileReader();
+
+      reader.onload = function(e) {
+        google.script.run
+          .withSuccessHandler(res => {
+            mappingBtn.disabled = false;
+            if (res.success) {
+              feedback.innerHTML = `<span class="text-success fw-bold">${res.message}</span>`;
+            } else {
+              feedback.innerHTML = `<span class="text-danger">${res.message}</span>`;
+            }
+          })
+          .withFailureHandler(err => {
+            mappingBtn.disabled = false;
+            feedback.innerHTML = `<span class="text-danger">Error: ${err.message}</span>`;
+          })
+          .uploadEmployeeMapping(e.target.result);
+      };
+      reader.readAsText(file);
+    }
+
+    function loadData(targetTab) {
+      google.script.run
+        .withSuccessHandler(data => {
+          rawDataset = data;
+          updateMetrics();
+          populateEmployeeDropdown();
+          if (targetTab === 'analytics') renderAnalyticsTable();
+          if (targetTab === 'database') renderFilteredData();
+        })
+        .getProcessedRecords();
+    }
+
+    function updateMetrics() {
+      document.getElementById("statTotal").textContent = rawDataset.length;
+      document.getElementById("statLate").textContent = rawDataset.filter(r => r.isLate).length;
+      document.getElementById("statEarly").textContent = rawDataset.filter(r => r.isEarly).length;
+      document.getElementById("statMissing").textContent = rawDataset.filter(r => r.isMissingPunch).length;
+    }
+
+    function populateEmployeeDropdown() {
+      const select = document.getElementById("userChartSelect");
+      const currentVal = select.value;
+
+      // Group distinct IDs and their corresponding names
+      const empMap = new Map();
+      rawDataset.forEach(r => {
+        if (!empMap.has(r.userId)) {
+          empMap.set(r.userId, r.userName);
+        }
+      });
+
+      select.innerHTML = '<option value="">-- Choose Employee --</option>';
+      [...empMap.keys()].sort().forEach(id => {
+        const opt = document.createElement("option");
+        opt.value = id;
+        const name = empMap.get(id);
+        opt.textContent = name !== "Unassigned" ? `${name} (ID: ${id})` : `Employee ID: ${id}`;
+        select.appendChild(opt);
+      });
+
+      if (currentVal && empMap.has(currentVal)) {
+        select.value = currentVal;
+        updateEmployeeCharts();
+      }
+    }
+
+    function updateEmployeeCharts() {
+      const userId = document.getElementById("userChartSelect").value;
+      const chartRow = document.getElementById("chartRow");
+      const quickStats = document.getElementById("employeeQuickStats");
+
+      if (!userId) {
+        chartRow.style.display = "none";
+        quickStats.textContent = "";
+        return;
+      }
+
+      chartRow.style.display = "flex";
+
+      const userRecords = rawDataset.filter(r => r.userId === userId).slice().sort((a,b) => a.date.localeCompare(b.date));
+
+      const labels = userRecords.map(r => r.date);
+      const hours = userRecords.map(r => r.totalHours);
+
+      const lateCount = userRecords.filter(r => r.isLate).length;
+      const earlyCount = userRecords.filter(r => r.isEarly).length;
+      const missingCount = userRecords.filter(r => r.isMissingPunch).length;
+      const onTimeCount = userRecords.length - (lateCount + earlyCount + missingCount);
+
+      const empName = userRecords[0]?.userName || "Unassigned";
+      quickStats.innerHTML = `Name: <strong>${empName}</strong> | Shifts: <strong>${userRecords.length}</strong> | Late: <strong class="text-danger">${lateCount}</strong> | Early: <strong class="text-warning">${earlyCount}</strong>`;
+
+      // Render Bar Chart
+      if (barChartInstance) barChartInstance.destroy();
+      const ctxBar = document.getElementById("hoursBarChart").getContext("2d");
+      barChartInstance = new Chart(ctxBar, {
+        type: 'bar',
+        data: {
+          labels: labels,
+          datasets: [{
+            label: 'Hours Worked',
+            data: hours,
+            backgroundColor: hours.map(h => h >= 8.0 ? '#0d6efd' : '#fd7e14'),
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: { beginAtZero: true, title: { display: true, text: 'Hours' } },
+            x: { ticks: { maxRotation: 45, minRotation: 45 } }
+          }
+        }
+      });
+
+      // Render Donut Chart
+      if (donutChartInstance) donutChartInstance.destroy();
+      const ctxDonut = document.getElementById("punctualityDonutChart").getContext("2d");
+      donutChartInstance = new Chart(ctxDonut, {
+        type: 'doughnut',
+        data: {
+          labels: ['On-Time', 'Late (>8:35)', 'Early (<16:30)', 'Missing Checkout'],
+          datasets: [{
+            data: [Math.max(0, onTimeCount), lateCount, earlyCount, missingCount],
+            backgroundColor: ['#198754', '#dc3545', '#fd7e14', '#6c757d']
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom' } }
+        }
+      });
+    }
+
+    function renderAnalyticsTable() {
+      const byDate = document.getElementById("modeDate").checked;
+      const thead = document.getElementById("analyticsThead");
+      const tbody = document.getElementById("analyticsBody");
+
+      if (!rawDataset.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-4 text-muted">No records available.</td></tr>';
+        return;
+      }
+
+      thead.innerHTML = `
+        <tr>
+          <th>${byDate ? "Date" : "Employee"}</th>
+          <th>Total Records</th>
+          <th>Late Count</th>
+          <th>Early Departure Count</th>
+          <th>Missing Punch Count</th>
+          <th>Avg Hours Worked</th>
+        </tr>
+      `;
+
+      const groups = {};
+      rawDataset.forEach(r => {
+        let key = r.date;
+        let displayName = r.date;
+        if (!byDate) {
+          key = r.userId;
+          displayName = r.userName !== "Unassigned" ? `${r.userName} (${r.userId})` : `ID: ${r.userId}`;
+        }
+
+        if (!groups[key]) {
+          groups[key] = { label: displayName, count: 0, late: 0, early: 0, missing: 0, totalHours: 0 };
+        }
+        groups[key].count++;
+        if (r.isLate) groups[key].late++;
+        if (r.isEarly) groups[key].early++;
+        if (r.isMissingPunch) groups[key].missing++;
+        groups[key].totalHours += r.totalHours;
+      });
+
+      tbody.innerHTML = Object.keys(groups).map(k => {
+        const g = groups[k];
+        const avgHours = (g.totalHours / g.count).toFixed(2);
+        return `
+          <tr>
+            <td class="fw-bold">${g.label}</td>
+            <td>${g.count}</td>
+            <td><span class="badge ${g.late > 0 ? 'badge-late' : 'badge-ontime'}">${g.late}</span></td>
+            <td><span class="badge ${g.early > 0 ? 'badge-early' : 'badge-ontime'}">${g.early}</span></td>
+            <td><span class="badge ${g.missing > 0 ? 'badge-missing' : 'badge-ontime'}">${g.missing}</span></td>
+            <td>${avgHours} hrs</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function renderFilteredData() {
+      const showLate = document.getElementById("filterLate").checked;
+      const showEarly = document.getElementById("filterEarly").checked;
+      const showMissing = document.getElementById("filterMissing").checked;
+
+      const filtered = rawDataset.filter(r => {
+        if (showLate && !r.isLate) return false;
+        if (showEarly && !r.isEarly) return false;
+        if (showMissing && !r.isMissingPunch) return false;
+        return true;
+      });
+
+      const tbody = document.getElementById("recordsBody");
+      if (!filtered.length) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted">No records matching criteria.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = filtered.map(r => `
+        <tr>
+          <td class="fw-bold">${r.userId}</td>
+          <td>${r.userName !== 'Unassigned' ? `<span class="fw-semibold text-primary">${r.userName}</span>` : '<span class="text-muted fst-italic">Unassigned</span>'}</td>
+          <td>${r.date}</td>
+          <td>${r.arrival}</td>
+          <td><span class="badge ${r.isLate ? 'badge-late' : 'badge-ontime'}">${r.arrivalStatus}</span></td>
+          <td>${r.dismissal}</td>
+          <td><span class="badge ${r.isMissingPunch ? 'badge-missing' : (r.isEarly ? 'badge-early' : 'badge-ontime')}">${r.dismissalStatus}</span></td>
+          <td><strong>${r.totalHours}</strong> hrs</td>
+        </tr>
+      `).join('');
+    }
+
+    function downloadCSV() {
+      if (!rawDataset.length) return alert("No data available to download.");
+      let csv = "Employee ID,Name,Date,Arrival,Arrival Status,Dismissal,Dismissal Status,Hours Worked\n";
+      rawDataset.forEach(r => {
+        csv += `"${r.userId}","${r.userName}","${r.date}","${r.arrival}","${r.arrivalStatus}","${r.dismissal}","${r.dismissalStatus}","${r.totalHours}"\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.setAttribute('href', url);
+      a.setAttribute('download', 'attendance_exceptions.csv');
+      a.click();
+    }
+
+    function confirmResetPunches() {
+      if (confirm("Are you sure you want to delete all stored attendance punches?")) {
+        google.script.run
+          .withSuccessHandler(msg => {
+            alert(msg);
+            loadData('database');
+          })
+          .clearAllLogs();
+      }
+    }
+
+    function confirmResetDirectory() {
+      if (confirm("Are you sure you want to delete the employee name-to-ID directory?")) {
+        google.script.run
+          .withSuccessHandler(msg => {
+            alert(msg);
+            loadData('database');
+          })
+          .clearAllDirectory();
+      }
+    }
+  </script>
+</body>
+</html>
